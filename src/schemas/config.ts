@@ -41,9 +41,16 @@ export const storefrontClientSchema = clientSchema.extend({
   cache: clientCacheSchema.or(z.boolean()).optional(),
 })
 
-export const adminClientSchema = clientSchema.extend({
-  accessToken: z.string(),
+export const adminClientBaseSchema = clientSchema.extend({
+  accessToken: z.string().optional(),
+  clientId: z.string().optional(),
+  clientSecret: z.string().optional(),
 })
+
+export const adminClientSchema = adminClientBaseSchema.refine(
+  data => data.accessToken || (data.clientId && data.clientSecret),
+  { message: 'Either accessToken or both clientId and clientSecret are required for the admin client' },
+)
 
 export const moduleOptionsSchema = z.object({
   name: z.string({

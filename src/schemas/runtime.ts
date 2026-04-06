@@ -11,7 +11,7 @@ import {
   ShopifyClientType,
   clientSchema,
   storefrontClientSchema,
-  adminClientSchema,
+  adminClientBaseSchema,
   moduleOptionsSchema,
   publicModuleOptionsSchema,
   clientCacheSchema,
@@ -88,14 +88,17 @@ const storefrontClientSchemaWithDefaults = clientSchemaWithDefaults.omit({
 const adminClientSchemaWithDefaults = clientSchemaWithDefaults.omit({
   documents: true,
 }).extend({
-  documents: adminClientSchema.shape.documents.transform(v => v ? v : defaultAdminDocuments),
+  documents: adminClientBaseSchema.shape.documents.transform(v => v ? v : defaultAdminDocuments),
 
-  autoImport: adminClientSchema.shape.autoImport,
+  autoImport: adminClientBaseSchema.shape.autoImport,
 
-  accessToken: z.string({
-    error: 'Access token is required for the admin client',
-  }),
-})
+  accessToken: z.string().optional(),
+  clientId: z.string().optional(),
+  clientSecret: z.string().optional(),
+}).refine(
+  data => data.accessToken || (data.clientId && data.clientSecret),
+  { message: 'Either accessToken or both clientId and clientSecret are required for the admin client' },
+)
 
 export const moduleOptionsSchemaWithDefaults = moduleOptionsSchema.omit({
   clients: true,

@@ -47,7 +47,29 @@ declare module '@nuxtjs/shopify/${kebabCase(clientType)}' {
 `
 }
 
-function getIntrospection(options: ShopifyTemplateOptions, _config: ShopifyConfig) {
+async function fetchBuildTimeToken(storeDomain: string, clientId: string, clientSecret: string): Promise<string> {
+  const url = `${storeDomain}/admin/oauth/access_token`
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      grant_type: 'client_credentials',
+      client_id: clientId,
+      client_secret: clientSecret,
+    }),
+  })
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new Error(`Failed to fetch Shopify admin access token for codegen: ${response.status} ${response.statusText}${body ? ` - ${body}` : ''}`)
+  }
+
+  const data = await response.json() as { access_token: string }
+  return data.access_token
+}
+
+async function getIntrospection(options: ShopifyTemplateOptions, _config: ShopifyConfig) {
   const { shopName, clientType, clientConfig, introspection } = options
 
   if (introspection && existsSync(introspection)) {
@@ -62,7 +84,15 @@ function getIntrospection(options: ShopifyTemplateOptions, _config: ShopifyConfi
   if (clientType === ShopifyClientType.Admin) {
     const adminConfig = clientConfig as NonNullable<ShopifyConfig['clients']['admin']>
     apiUrl = `https://${shopName}.myshopify.com/admin/api/${apiVersion}/graphql.json`
-    headers['X-Shopify-Access-Token'] = adminConfig.accessToken
+
+    if (adminConfig.accessToken) {
+      headers['X-Shopify-Access-Token'] = adminConfig.accessToken
+    }
+    else if (adminConfig.clientId && adminConfig.clientSecret) {
+      const storeDomain = `https://${shopName}.myshopify.com`
+      const token = await fetchBuildTimeToken(storeDomain, adminConfig.clientId, adminConfig.clientSecret)
+      headers['X-Shopify-Access-Token'] = token
+    }
   }
   else {
     const storefrontConfig = clientConfig as NonNullable<ShopifyConfig['clients']['storefront']>
@@ -113,7 +143,7 @@ function getTypescriptPluginConfig(config: ShopifyConfig['clients'][ShopifyClien
 export function createIntrospectionGenerator(config: ShopifyConfig): NuxtTemplate<ShopifyTemplateOptions>['getContents'] {
   return async (data) => {
     const generatorConfig = {
-      schema: getIntrospection(data.options, config),
+      schema: await getIntrospection(data.options, config),
       plugins: [{
         introspection: {
           minify: true,
@@ -140,7 +170,7 @@ export function createIntrospectionGenerator(config: ShopifyConfig): NuxtTemplat
 export function createTypesGenerator(config: ShopifyConfig): NuxtTemplate<ShopifyTemplateOptions>['getContents'] {
   return async (data) => {
     const generatorConfig = {
-      schema: getIntrospection(data.options, config),
+      schema: await getIntrospection(data.options, config),
       plugins: [getTypescriptPluginConfig(data.options.clientConfig)],
     } satisfies Types.ConfiguredOutput
 
@@ -163,7 +193,7 @@ export function createTypesGenerator(config: ShopifyConfig): NuxtTemplate<Shopif
 export function createOperationsGenerator(config: ShopifyConfig): NuxtTemplate<ShopifyTemplateOptions>['getContents'] {
   return async (data) => {
     const generatorConfig = {
-      schema: getIntrospection(data.options, config),
+      schema: await getIntrospection(data.options, config),
       preset,
       documents: data.options.clientConfig?.documents?.map((d) => {
         if (d.startsWith('!')) {
@@ -195,6 +225,7 @@ export function createOperationsGenerator(config: ShopifyConfig): NuxtTemplate<S
 
     return extractResult(generate({
       overwrite: true,
+      ignoreNoDocuments: true,
       silent: useLogger(config).level < LogLevels.debug,
       generates: {
         [data.options.filename]: generatorConfig,
